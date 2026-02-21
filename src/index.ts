@@ -6,6 +6,15 @@ import { sseManager } from './sse/index.js';
 import { ILogger } from "@digital-alchemy/core";
 import express from 'express';
 import { rateLimiter, securityHeaders, validateRequest, sanitizeInput, errorHandler } from './security/index.js';
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+  ErrorCode,
+  McpError,
+} from '@modelcontextprotocol/sdk/types.js';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 
 // Load environment variables based on NODE_ENV
 const envFile = process.env.NODE_ENV === 'production'
@@ -27,7 +36,7 @@ const HASS_HOST = process.env.HASS_HOST || 'http://192.168.178.63:8123';
 const HASS_TOKEN = process.env.HASS_TOKEN;
 const PORT = process.env.PORT || 3000;
 const MCP_TRANSPORT = process.env.MCP_TRANSPORT || 'stdio';
-const MCP_SSE_PORT = parseInt(process.env.MCP_SSE_PORT || '8080', 10);
+const MCP_API_KEY = process.env.MCP_API_KEY || '';
 
 console.log('Initializing Home Assistant connection...');
 
@@ -1242,16 +1251,86 @@ async function main() {
 
   logger.debug('[server:init]', 'Initializing MCP Server...');
 
-  // Start the MCP server with configured transport
   if (MCP_TRANSPORT === 'sse') {
-    await server.start({
-      transportType: 'sse',
-      sse: {
-        endpoint: '/sse',
-        port: MCP_SSE_PORT,
-      },
+    // Build an authenticated MCP SSE server on Express using the official SDK
+    const mcpServer = new Server(
+      { name: 'home-assistant', version: '0.1.0' },
+      { capabilities: { tools: {} } }
+    );
+
+    mcpServer.setRequestHandler(ListToolsRequestSchema, async () => ({
+      tools: tools.map(t => ({
+        name: t.name,
+        description: t.description,
+        inputSchema: t.parameters ? zodToJsonSchema(t.parameters) : undefined,
+      })),
+    }));
+
+    mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
+      const tool = tools.find(t => t.name === request.params.name);
+      if (!tool) {
+        throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${request.params.name}`);
+      }
+      let args: any = undefined;
+      if (tool.parameters) {
+        const parsed = tool.parameters.safeParse(request.params.arguments);
+        if (!parsed.success) {
+          throw new McpError(ErrorCode.InvalidRequest, `Invalid ${request.params.name} arguments`);
+        }
+        args = parsed.data;
+      }
+      try {
+        const result = await tool.execute(args);
+        const text = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+        return { content: [{ type: 'text', text }] };
+      } catch (error) {
+        return { content: [{ type: 'text', text: `Error: ${error}` }], isError: true };
+      }
     });
-    logger.info('[server:init]', `MCP Server started with SSE transport on port ${MCP_SSE_PORT}`);
+
+    const sseTransports = new Map<string, SSEServerTransport>();
+
+    const validateApiKey = (req: express.Request, res: express.Response): boolean => {
+      if (!MCP_API_KEY) return true;
+      const key = (req.query as any).api_key || req.headers['x-api-key'];
+      if (key !== MCP_API_KEY) {
+        res.status(401).json({ error: 'Unauthorized: invalid or missing api_key' });
+        return false;
+      }
+      return true;
+    };
+
+    app.get('/sse', async (req, res) => {
+      if (!validateApiKey(req, res)) return;
+      const transport = new SSEServerTransport('/message', res);
+      sseTransports.set(transport.sessionId, transport);
+      logger.info('[mcp:sse]', `Client connected: ${transport.sessionId}`);
+
+      res.on('close', () => {
+        sseTransports.delete(transport.sessionId);
+        logger.info('[mcp:sse]', `Client disconnected: ${transport.sessionId}`);
+      });
+
+      await mcpServer.connect(transport);
+    });
+
+    app.post('/message', async (req, res) => {
+      if (!validateApiKey(req, res)) return;
+      const sessionId = req.query.sessionId as string;
+      const transport = sseTransports.get(sessionId);
+      if (!transport) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
+      await transport.handlePostMessage(req, res);
+    });
+
+    logger.info('[server:init]', `MCP Server started with SSE transport on Express (port ${PORT})`);
+    if (MCP_API_KEY) {
+      logger.info('[server:init]', 'MCP API key authentication enabled');
+    } else {
+      logger.warn('[server:init]', 'WARNING: No MCP_API_KEY set - SSE endpoint is unauthenticated!');
+    }
   } else {
     await server.start();
     logger.info('[server:init]', 'MCP Server started with stdio transport');

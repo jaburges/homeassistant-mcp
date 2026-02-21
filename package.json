@@ -21,6 +21,7 @@
   "dependencies": {
     "@digital-alchemy/core": "^24.11.4",
     "@digital-alchemy/hass": "^24.11.4",
+    "@modelcontextprotocol/sdk": "^1.26.0",
     "ajv": "^8.12.0",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
@@ -29,7 +30,8 @@
     "litemcp": "^0.7.0",
     "uuid": "^9.0.1",
     "ws": "^8.16.0",
-    "zod": "^3.22.4"
+    "zod": "^3.22.4",
+    "zod-to-json-schema": "^3.25.1"
   },
   "devDependencies": {
     "@types/ajv": "^1.0.0",
