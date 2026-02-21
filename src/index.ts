@@ -26,6 +26,8 @@ import { DomainSchema } from './schemas.js';
 const HASS_HOST = process.env.HASS_HOST || 'http://192.168.178.63:8123';
 const HASS_TOKEN = process.env.HASS_TOKEN;
 const PORT = process.env.PORT || 3000;
+const MCP_TRANSPORT = process.env.MCP_TRANSPORT || 'stdio';
+const MCP_SSE_PORT = parseInt(process.env.MCP_SSE_PORT || '8080', 10);
 
 console.log('Initializing Home Assistant connection...');
 
@@ -1240,10 +1242,20 @@ async function main() {
 
   logger.debug('[server:init]', 'Initializing MCP Server...');
 
-  // Start the server
-  await server.start();
-  logger.info('[server:init]', `MCP Server started on port ${PORT}`);
-  logger.info('[server:init]', 'Home Assistant server running on stdio');
+  // Start the MCP server with configured transport
+  if (MCP_TRANSPORT === 'sse') {
+    await server.start({
+      transportType: 'sse',
+      sse: {
+        endpoint: '/sse',
+        port: MCP_SSE_PORT,
+      },
+    });
+    logger.info('[server:init]', `MCP Server started with SSE transport on port ${MCP_SSE_PORT}`);
+  } else {
+    await server.start();
+    logger.info('[server:init]', 'MCP Server started with stdio transport');
+  }
   logger.info('[server:init]', 'SSE endpoints initialized');
 
   // Log available endpoints using our tracked tools array
