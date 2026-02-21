@@ -42,7 +42,7 @@ console.log('Initializing Home Assistant connection...');
 
 // Initialize Express app
 const app = express();
-app.set('trust proxy', true);
+app.set('trust proxy', 1);
 
 // MCP endpoints use their own API key auth — skip rate limiter and token validation for them
 const isMcpPath = (req: express.Request) => req.path === '/sse' || req.path === '/message';
@@ -1321,7 +1321,6 @@ async function main() {
     });
 
     app.post('/message', async (req, res) => {
-      if (!validateApiKey(req, res)) return;
       const sessionId = req.query.sessionId as string;
       const transport = sseTransports.get(sessionId);
       if (!transport) {
