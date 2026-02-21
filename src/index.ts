@@ -43,11 +43,16 @@ console.log('Initializing Home Assistant connection...');
 // Initialize Express app
 const app = express();
 
+// MCP endpoints use their own API key auth — skip rate limiter and token validation for them
+const isMcpPath = (req: express.Request) => req.path === '/sse' || req.path === '/message';
+const unlessMcp = (mw: express.RequestHandler): express.RequestHandler =>
+  (req, res, next) => isMcpPath(req) ? next() : mw(req, res, next);
+
 // Apply security middleware
 app.use(securityHeaders);
-app.use(rateLimiter);
+app.use(unlessMcp(rateLimiter));
 app.use(express.json());
-app.use(validateRequest);
+app.use(unlessMcp(validateRequest));
 app.use(sanitizeInput);
 
 // Initialize LiteMCP
