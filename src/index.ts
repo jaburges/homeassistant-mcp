@@ -52,9 +52,9 @@ const unlessMcp = (mw: express.RequestHandler): express.RequestHandler =>
 // Apply security middleware
 app.use(securityHeaders);
 app.use(unlessMcp(rateLimiter));
-app.use(express.json());
+app.use(unlessMcp(express.json() as express.RequestHandler));
 app.use(unlessMcp(validateRequest));
-app.use(sanitizeInput);
+app.use(unlessMcp(sanitizeInput));
 
 // Initialize LiteMCP
 const server = new LiteMCP('home-assistant', '0.1.0');
